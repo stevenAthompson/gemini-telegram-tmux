@@ -59,17 +59,12 @@ function cleanOutput(text: string): string {
     // eslint-disable-next-line no-control-regex
     let clean = text.replace(/\x1B\[\d+;?\d*m/g, "");
     
-    // 2. Aggressively strip box-drawing and UI characters
-    clean = clean.replace(/[│─╭╮╰╯─╼╽╾╿┌┐└┘├┤┬┴┼═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬]/g, "");
-    
-    // 3. Strip other weird UI symbols (dots, bullets, loaders)
-    clean = clean.replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏•✓✖⚠]/g, "");
+    // 2. Aggressively strip box-drawing, UI chars, and common loader symbols
+    // Grouped for efficiency
+    clean = clean.replace(/[│─╭╮╰╯─╼╽╾╿┌┐└┘├┤┬┴┼═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏•✓✖⚠]/g, "");
 
-    // 4. Remove empty lines or lines with only spaces
-    clean = clean.split('\n')
-                 .map(line => line.trim())
-                 .filter(line => line.length > 0)
-                 .join('\n');
+    // 3. Remove excessive blank lines (preserve single newlines)
+    clean = clean.replace(/\n\s*\n/g, '\n');
     
     return clean.trim();
 }
