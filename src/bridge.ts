@@ -46,15 +46,22 @@ fs.watch(OUTBOX_DIR, (eventType, filename) => {
 });
 
 function cleanOutput(text: string): string {
-    // 1. Strip ANSI escape codes (simple version)
+    // 1. Strip ANSI escape codes
     // eslint-disable-next-line no-control-regex
     let clean = text.replace(/\x1B\[\d+;?\d*m/g, "");
     
-    // 2. Strip box-drawing characters common in CLI UIs
-    clean = clean.replace(/[│─╭╮╰╯─]/g, "");
+    // 2. Aggressively strip box-drawing and UI characters
+    // Sourced from common CLI framework symbols
+    clean = clean.replace(/[│─╭╮╰╯─╼╽╾╿┌┐└┘├┤┬┴┼═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬]/g, "");
     
-    // 3. Remove excessive blank lines resulting from the strip
-    clean = clean.replace(/\n\s*\n/g, "\n");
+    // 3. Strip other weird UI symbols (dots, bullets, loaders)
+    clean = clean.replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏•✓✖⚠]/g, "");
+
+    // 4. Remove empty lines or lines with only spaces
+    clean = clean.split('\n')
+                 .map(line => line.trim())
+                 .filter(line => line.length > 0)
+                 .join('\n');
     
     return clean.trim();
 }
