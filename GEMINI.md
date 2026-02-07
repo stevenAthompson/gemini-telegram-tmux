@@ -7,7 +7,7 @@ A Gemini CLI extension that allows gemini to interact with telegram as if you we
 ### start_telegram_bridge
 Starts a background bridge that forwards Telegram messages to the current Gemini tmux session and returns responses.
 
-- `bot_token` (string): The Telegram Bot API Token obtained from @BotFather.
+- `bot_token` (string, optional): The Telegram Bot API Token obtained from @BotFather. **Required only for the first run.** Subsequent calls can omit this, as the token is saved locally.
 
 **Behavior:**
 - This tool spawns a detached background process (`bridge.js`).
@@ -35,14 +35,15 @@ Use this to notify the user of completed tasks, errors, or important events with
 ## Usage Example
 
 ```typescript
-// 1. Start the bridge
+// First time setup (token is saved automatically)
 start_telegram_bridge({
   bot_token: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
 });
 
-// ... later, after user has connected ...
+// Future sessions (token loaded from file)
+start_telegram_bridge({});
 
-// 2. Send a notification
+// Send a notification
 send_telegram_notification({
   message: "Task completed successfully!"
 });
