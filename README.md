@@ -21,8 +21,9 @@ This extension bridges your local Gemini CLI session to Telegram. It allows you 
 1.  **Tmux**: You must be running the Gemini CLI inside a tmux session (default name `gemini-cli`).
 2.  **Telegram Bot**:
     *   Open Telegram and search for **@BotFather**.
-    *   Send `/newbot` and follow the instructions.
-    *   Copy the **API Token** it gives you.
+    *   Start a chat and send `/newbot`.
+    *   Follow the prompts to name your bot.
+    *   **Copy the API Token** (it looks like `123456:ABC-DEF...`).
 
 ## Installation
 
@@ -52,17 +53,17 @@ gemini extension install https://github.com/stevenAthompson/gemini-telegram-tmux
     ```
     *(Or manually: `tmux new -s gemini-cli gemini`)*
 
-2.  **Configure (One Time Only)**:
-    Inside the Gemini CLI, tell the agent to save your token:
-    ```text
-    configure_telegram bot_token="YOUR_BOT_TOKEN_HERE"
-    ```
+2.  **Connect (One Time Only)**:
+    In the Gemini CLI, simply tell the agent you want to connect:
+    > "Connect my Telegram"
+    
+    The agent will ask for your token. Paste it in, and the agent will handle the rest!
 
 3.  **Chat**:
     Open your bot in Telegram and say "Hello!". You should see the message appear in your terminal, and the agent's response appear on your phone.
 
 4.  **Receive Notifications**:
-    Once you've messaged the bot, the agent can use `send_telegram_notification` to ping you proactively.
+    Once connected, the agent can proactively ping you when tasks finish:
     > "Hey, that build you started 20 minutes ago just finished!"
 
 ## Troubleshooting
