@@ -24,3 +24,10 @@ Sends a proactive message to the connected Telegram user.
 2.  **Configure**: If status says "Not Configured", ask the user: "Please provide your Telegram Bot Token." When they reply, call `configure_telegram(token)`.
 3.  **Connect**: If status says "Not Connected", tell the user: "Please send a message to your bot on Telegram so I can capture your Chat ID."
 4.  **Notify**: Use `send_telegram_notification` to ping the user about completed tasks.
+
+# IMPORTANT NOTES FOR DEVELOPERS
+- Gemini extensions are distributed via Github and must include all requirements. 
+- **MANDATORY**: You MUST include the `dist/` and `node_modules/` folders in the git repository. Do NOT ignore them.
+- **SYNC RULE**: Every time you modify files in `src/`, you MUST run `npm run build` and `git add dist/` before committing. Failure to do this results in users running stale code.
+- Always gitignore any secrets, keys, or other sensitive information (like `.bot_token`).
+- Exclude the "reference" folder from any git pushes. That code is for reference only.
