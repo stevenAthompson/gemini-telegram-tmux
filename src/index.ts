@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { spawn, ChildProcess, execSync } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import * as fs from 'fs';
@@ -20,29 +20,30 @@ const server = new McpServer({
 let bridgeProcess: ChildProcess | null = null;
 const TOKEN_FILE = path.join(__dirname, '../.bot_token');
 const LOG_FILE = path.join(os.tmpdir(), 'gemini_telegram_bridge.log');
+const PID_FILE = path.join(os.tmpdir(), 'gemini_telegram_bridge.pid');
 
 /**
- * Kills any existing bridge processes running from this extension.
+ * Kills any existing bridge processes using the PID file.
  */
 function killExistingBridges() {
-    try {
-        const bridgeScript = path.join(__dirname, 'bridge.js');
-        // Find processes running this specific script
-        const cmd = `pgrep -f "node ${bridgeScript}"`;
-        const pids = execSync(cmd, { encoding: 'utf-8' }).trim().split('\n');
-        
-        for (const pid of pids) {
-            if (pid && pid !== process.pid.toString()) {
+    if (fs.existsSync(PID_FILE)) {
+        try {
+            const pid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim(), 10);
+            if (!isNaN(pid)) {
                 try {
-                    process.kill(parseInt(pid), 'SIGTERM');
-                    console.error(`Gemini-Telegram-Bridge: Killed zombie bridge PID ${pid}`);
-                } catch (e) {
-                    // Ignore if already dead
+                    process.kill(pid, 'SIGTERM');
+                    console.error(`Gemini-Telegram-Bridge: Killed existing bridge PID ${pid}`);
+                } catch (e: any) {
+                    if (e.code !== 'ESRCH') {
+                        console.error(`Gemini-Telegram-Bridge: Failed to kill PID ${pid}:`, e);
+                    }
                 }
             }
+        } catch (e) {
+            console.error("Gemini-Telegram-Bridge: Error reading PID file:", e);
         }
-    } catch (e) {
-        // pgrep returns exit code 1 if no processes found, which throws error. Ignore.
+        // Clean up file
+        try { fs.unlinkSync(PID_FILE); } catch {}
     }
 }
 

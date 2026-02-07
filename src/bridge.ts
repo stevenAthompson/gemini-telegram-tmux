@@ -14,10 +14,19 @@ if (!token || !targetPane) {
     process.exit(1);
 }
 
+// PID File Management
+const TMP_DIR = os.tmpdir();
+const PID_FILE = path.join(TMP_DIR, 'gemini_telegram_bridge.pid');
+try {
+    fs.writeFileSync(PID_FILE, process.pid.toString());
+    console.log(`Bridge started. PID: ${process.pid}`);
+} catch (e) {
+    console.error("Failed to write PID file:", e);
+}
+
 const bot = new Telegraf(token);
 const conversationLock = new FileLock('gemini-telegram-bridge', 500, 10);
 
-const TMP_DIR = os.tmpdir();
 const CHAT_ID_FILE = path.join(TMP_DIR, 'gemini_telegram_chat_id.txt');
 const OUTBOX_DIR = path.join(TMP_DIR, 'gemini_telegram_outbox');
 
@@ -51,7 +60,6 @@ function cleanOutput(text: string): string {
     let clean = text.replace(/\x1B\[\d+;?\d*m/g, "");
     
     // 2. Aggressively strip box-drawing and UI characters
-    // Sourced from common CLI framework symbols
     clean = clean.replace(/[│─╭╮╰╯─╼╽╾╿┌┐└┘├┤┬┴┼═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬]/g, "");
     
     // 3. Strip other weird UI symbols (dots, bullets, loaders)
@@ -166,5 +174,11 @@ bot.on(message('text'), async (ctx) => {
 
 bot.launch();
 
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGINT', () => {
+    try { fs.unlinkSync(PID_FILE); } catch {} // eslint-disable-line no-empty
+    bot.stop('SIGINT');
+});
+process.once('SIGTERM', () => {
+    try { fs.unlinkSync(PID_FILE); } catch {} // eslint-disable-line no-empty
+    bot.stop('SIGTERM');
+});
