@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import * as fs from 'fs';
@@ -22,6 +22,31 @@ const TOKEN_FILE = path.join(__dirname, '../.bot_token');
 const LOG_FILE = path.join(os.tmpdir(), 'gemini_telegram_bridge.log');
 
 /**
+ * Kills any existing bridge processes running from this extension.
+ */
+function killExistingBridges() {
+    try {
+        const bridgeScript = path.join(__dirname, 'bridge.js');
+        // Find processes running this specific script
+        const cmd = `pgrep -f "node ${bridgeScript}"`;
+        const pids = execSync(cmd, { encoding: 'utf-8' }).trim().split('\n');
+        
+        for (const pid of pids) {
+            if (pid && pid !== process.pid.toString()) {
+                try {
+                    process.kill(parseInt(pid), 'SIGTERM');
+                    console.error(`Gemini-Telegram-Bridge: Killed zombie bridge PID ${pid}`);
+                } catch (e) {
+                    // Ignore if already dead
+                }
+            }
+        }
+    } catch (e) {
+        // pgrep returns exit code 1 if no processes found, which throws error. Ignore.
+    }
+}
+
+/**
  * Internal helper to start the bridge process.
  * Returns true if started or already running, false if configuration missing.
  */
@@ -29,6 +54,9 @@ function startBridge(): boolean {
     if (bridgeProcess && !bridgeProcess.killed) {
         return true;
     }
+
+    // Kill zombies before starting new one
+    killExistingBridges();
 
     // 1. Check Tmux
     const paneId = tmux.getPaneId();
@@ -88,24 +116,12 @@ server.registerTool(
     try {
         fs.writeFileSync(TOKEN_FILE, bot_token, { encoding: 'utf-8', mode: 0o600 });
         
-        // Kill existing if any to restart with new token
-        if (bridgeProcess) {
-            bridgeProcess.kill();
-            bridgeProcess = null;
-        }
-
-        const started = startBridge();
+        // Restart bridge with new token
+        startBridge();
         
-        if (started) {
-             return {
-                content: [{ type: 'text', text: `Configuration saved and bridge started successfully!\nLogs: ${LOG_FILE}` }]
-            };
-        } else {
-             return {
-                content: [{ type: 'text', text: `Configuration saved, but failed to start bridge. Are you running in tmux? Check logs: ${LOG_FILE}` }],
-                isError: true
-            };
-        }
+        return {
+            content: [{ type: 'text', text: `Configuration saved and bridge started successfully!\nLogs: ${LOG_FILE}` }]
+        };
 
     } catch (e: any) {
         return {
@@ -138,7 +154,6 @@ server.registerTool(
         const CHAT_ID_FILE = path.join(TMP_DIR, 'gemini_telegram_chat_id.txt');
         
         if (!fs.existsSync(OUTBOX_DIR)) {
-             // Should have been created by bridge, but maybe it just started
              try { fs.mkdirSync(OUTBOX_DIR); } catch {}
         }
 
