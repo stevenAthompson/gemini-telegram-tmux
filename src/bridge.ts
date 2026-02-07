@@ -108,17 +108,16 @@ bot.on(message('text'), async (ctx) => {
             // Type message (slowly, mimicking human input)
             await tmux.typeText(targetPane, userMsg, 30);
             
-            // Wait for typing to settle
+            // Wait for typing to settle (Reference uses 500ms, we use 800ms to be safe)
             await new Promise(r => setTimeout(r, 800));
             
-            // Send Enter (C-m is safer)
-            console.log(`[Msg ${msgId}] Sending Enter (C-m)...`);
-            tmux.sendKeys(targetPane, 'C-m');
+            // Reference Style: Enter -> Wait 500ms -> Enter
+            console.log(`[Msg ${msgId}] Sending Enter...`);
+            tmux.sendKeys(targetPane, 'Enter');
             
-            // Wait again
             await new Promise(r => setTimeout(r, 500));
             
-            // Double tap if needed (Enter key this time)
+            console.log(`[Msg ${msgId}] Sending Enter (confirm)...`);
             tmux.sendKeys(targetPane, 'Enter'); 
 
             await tmux.waitForStability(targetPane, 3000, 500, 60000);
