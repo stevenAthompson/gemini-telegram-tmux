@@ -46,9 +46,9 @@ fs.watch(OUTBOX_DIR, (eventType, filename) => {
 });
 
 function cleanOutput(text: string): string {
-    // 1. Strip ANSI escape codes
+    // 1. Strip ANSI escape codes (simple version)
     // eslint-disable-next-line no-control-regex
-    let clean = text.replace(/\x1B[[\]?([0-9]{1,4}(;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, "");
+    let clean = text.replace(/\x1B\[\d+;?\d*m/g, "");
     
     // 2. Strip box-drawing characters common in CLI UIs
     clean = clean.replace(/[│─╭╮╰╯─]/g, "");
