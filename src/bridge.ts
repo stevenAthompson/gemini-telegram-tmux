@@ -112,9 +112,16 @@ async function processOutboxMessage(filePath: string) {
 }
 
 bot.on(message('text'), async (ctx) => {
-    const userMsg = ctx.message.text;
+    let userMsg = ctx.message.text;
     const chatId = ctx.chat.id.toString();
     const msgId = ctx.message.message_id;
+    
+    // Safety: Prevent accidental shell mode trigger in Gemini CLI
+    // An '!' at the start of a line often forces shell execution.
+    // We prepend a space to neutralize it while keeping the message readable.
+    userMsg = userMsg.split('\n')
+                     .map(line => line.startsWith('!') ? ' ' + line : line)
+                     .join('\n');
     
     if (activeChatId !== chatId) {
         activeChatId = chatId;
