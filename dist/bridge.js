@@ -52,18 +52,14 @@ function cleanOutput(text) {
     // eslint-disable-next-line no-control-regex
     let clean = text.replace(/\x1B\[\d+;?\d*m/g, "");
     // 2. Aggressively strip box-drawing, UI chars, and common loader symbols
-    // Grouped for efficiency
     clean = clean.replace(/[│─╭╮╰╯─╼╽╾╿┌┐└┘├┤┬┴┼═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏•✓✖⚠]/g, "");
-    // 3. Remove excessive blank lines (preserve single newlines)
-    clean = clean.replace(/\n\s*\n/g, '\n');
-    // 4. Remove Gemini CLI Status Bar specific lines
-    // "Using: 8 GEMINI.md files..."
-    // "YOLO mode..."
-    // "Type your message..."
+    // 3. Remove Gemini CLI Status Bar specific lines
     clean = clean.replace(/Using: \d+ GEMINI\.md files.*$/gm, "");
     clean = clean.replace(/YOLO mode \(ctrl \+ y to toggle\).*$/gm, "");
     clean = clean.replace(/\* +Type your message or @path\/to\/file.*$/gm, "");
-    clean = clean.replace(/~\/.*no sandbox.*Auto.*$/gm, ""); // Bottom path line
+    clean = clean.replace(/~\/.*no sandbox.*Auto.*$/gm, "");
+    // 4. Convert all newline sequences to exactly TWO newlines for readability
+    clean = clean.replace(/\n+/g, "\n\n");
     return clean.trim();
 }
 async function processOutboxMessage(filePath) {
