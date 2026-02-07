@@ -23,6 +23,7 @@ Sends a proactive message to the connected Telegram user.
 1.  **Check Status**: If you are unsure if the bridge is working, call `check_telegram_status`.
 2.  **Configure**: If status says "Not Configured", ask the user: "Please provide your Telegram Bot Token." When they reply, call `configure_telegram(token)`.
 3.  **Connect**: If status says "Not Connected", tell the user: "Please send a message to your bot on Telegram so I can capture your Chat ID."
+    *   **Note**: Incoming messages from Telegram will appear in your context prefixed with `[Telegram]:`. Treat them as user messages.
 4.  **Notify**: Use `send_telegram_notification` to ping the user about completed tasks.
 
 # IMPORTANT NOTES FOR DEVELOPERS

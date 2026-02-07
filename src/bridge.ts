@@ -119,9 +119,14 @@ bot.on(message('text'), async (ctx) => {
     // Safety: Prevent accidental shell mode trigger in Gemini CLI
     // An '!' at the start of a line often forces shell execution.
     // We prepend a space to neutralize it while keeping the message readable.
+    // Also prepend [Telegram] context.
+    const prefix = "[Telegram]: ";
     userMsg = userMsg.split('\n')
                      .map(line => line.startsWith('!') ? ' ' + line : line)
                      .join('\n');
+    
+    // Combine
+    const finalMsg = `${prefix}${userMsg}`;
     
     if (activeChatId !== chatId) {
         activeChatId = chatId;
@@ -135,10 +140,9 @@ bot.on(message('text'), async (ctx) => {
             await tmux.waitForStability(targetPane);
             
             console.log(`[Msg ${msgId}] Injecting message...`);
-            await tmux.injectCommand(targetPane, userMsg);
+            await tmux.injectCommand(targetPane, finalMsg);
             
             console.log(`[Msg ${msgId}] Waiting for response...`);
-            // Reduce timeout to 20s to be more responsive/fail-fast
             await tmux.waitForStability(targetPane, 3000, 500, 20000);
             
             let contentAfter = tmux.capturePane(targetPane, 200);
@@ -149,11 +153,12 @@ bot.on(message('text'), async (ctx) => {
                 contentAfter = lines.slice(0, -5).join('\n');
             }
 
-            const msgIndex = contentAfter.lastIndexOf(userMsg);
+            // We look for the ECHO of what we typed to find where the response starts
+            const msgIndex = contentAfter.lastIndexOf(finalMsg);
             let response = "";
             
             if (msgIndex !== -1) {
-                response = contentAfter.substring(msgIndex + userMsg.length).trim();
+                response = contentAfter.substring(msgIndex + finalMsg.length).trim();
             } else {
                  // If we can't find our message, take the last 20 lines (of the trimmed content)
                  const lastLines = lines.slice(0, -5).slice(-20).join('\n');
