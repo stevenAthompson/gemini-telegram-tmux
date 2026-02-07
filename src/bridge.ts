@@ -127,7 +127,8 @@ bot.on(message('text'), async (ctx) => {
             await tmux.injectCommand(targetPane, userMsg);
             
             console.log(`[Msg ${msgId}] Waiting for response...`);
-            await tmux.waitForStability(targetPane, 3000, 500, 60000);
+            // Reduce timeout to 20s to be more responsive/fail-fast
+            await tmux.waitForStability(targetPane, 3000, 500, 20000);
             
             let contentAfter = tmux.capturePane(targetPane, 200);
             
@@ -172,7 +173,11 @@ bot.on(message('text'), async (ctx) => {
     }
 });
 
-bot.launch();
+bot.launch({
+    // Increase handler timeout to avoid crashes on long running CLI tasks
+    // Default is 90s. We set to 5 minutes.
+    handlerTimeout: 300_000
+});
 
 process.once('SIGINT', () => {
     try { fs.unlinkSync(PID_FILE); } catch {} // eslint-disable-line no-empty
