@@ -69,6 +69,42 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+    'send_telegram_notification',
+    {
+        description: 'Sends a message to the connected Telegram user. Requires start_telegram_bridge to be running and a user to have messaged the bot at least once.',
+        inputSchema: z.object({
+            message: z.string().describe('The message to send.'),
+        }),
+    },
+    async ({ message }) => {
+        const OUTBOX_DIR = path.join(os.tmpdir(), 'gemini_telegram_outbox');
+        
+        if (!fs.existsSync(OUTBOX_DIR)) {
+             return {
+                content: [{ type: 'text', text: 'Error: Bridge outbox directory not found. Is start_telegram_bridge running?' }],
+                isError: true
+            };
+        }
+
+        // Write unique file
+        const filename = `msg_${Date.now()}_${Math.random().toString(36).substring(7)}.json`;
+        const filePath = path.join(OUTBOX_DIR, filename);
+
+        try {
+            fs.writeFileSync(filePath, JSON.stringify({ message }));
+            return {
+                content: [{ type: 'text', text: 'Notification queued.' }]
+            };
+        } catch (e: any) {
+            return {
+                content: [{ type: 'text', text: `Error queuing notification: ${e.message}` }],
+                isError: true
+            };
+        }
+    }
+);
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
 

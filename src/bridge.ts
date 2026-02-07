@@ -1,8 +1,10 @@
-
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
 import * as tmux from './tmux_utils.js';
 import { FileLock } from './file_lock.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const targetPane = process.env.TARGET_PANE;
@@ -13,60 +15,111 @@ if (!token || !targetPane) {
 }
 
 const bot = new Telegraf(token);
+const conversationLock = new FileLock('gemini-telegram-bridge', 500, 10);
 
-// Lock to ensure we don't mix up conversation turns
-// We use a file lock shared with the Gemini extension to prevent Gemini from typing while we are processing
-// Actually, Gemini itself uses locks? No, Gemini is single threaded per turn.
-// But if the User types in Telegram, we are injecting keys. We should avoid injecting if Gemini is typing.
-const conversationLock = new FileLock('gemini-telegram-bridge', 500, 10); // Short retry, fail fast? No, wait.
+// -- Persistence and Outbox Logic --
+const TMP_DIR = os.tmpdir();
+const CHAT_ID_FILE = path.join(TMP_DIR, 'gemini_telegram_chat_id.txt');
+const OUTBOX_DIR = path.join(TMP_DIR, 'gemini_telegram_outbox');
+
+if (!fs.existsSync(OUTBOX_DIR)) {
+    fs.mkdirSync(OUTBOX_DIR);
+}
+
+let activeChatId: string | null = null;
+
+// Load previous chat ID if exists
+if (fs.existsSync(CHAT_ID_FILE)) {
+    try {
+        activeChatId = fs.readFileSync(CHAT_ID_FILE, 'utf-8').trim();
+        console.log(`Loaded saved Chat ID: ${activeChatId}`);
+    } catch (e) {
+        console.error("Failed to load chat ID file", e);
+    }
+}
+
+// Watch Outbox for new messages from Gemini
+fs.watch(OUTBOX_DIR, (eventType, filename) => {
+    if (eventType === 'rename' && filename) {
+        const filePath = path.join(OUTBOX_DIR, filename);
+        if (fs.existsSync(filePath)) {
+            // Wait slightly to ensure write complete? usually atomic rename is better but simple write might be racey.
+            // But if the tool writes then close, it should be fine.
+            // Let's add a small delay or retry.
+            setTimeout(() => processOutboxMessage(filePath), 100);
+        }
+    }
+});
+
+async function processOutboxMessage(filePath: string) {
+    try {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        let msg = "";
+        try {
+            const json = JSON.parse(content);
+            msg = json.message;
+        } catch {
+            msg = content; // Fallback to raw text
+        }
+
+        if (activeChatId) {
+             // Split long messages
+             if (msg.length > 4000) {
+                 const chunks = msg.match(/.{1,4000}/g) || [];
+                 for (const chunk of chunks) {
+                     await bot.telegram.sendMessage(activeChatId, chunk);
+                 }
+             } else {
+                 await bot.telegram.sendMessage(activeChatId, msg);
+             }
+        } else {
+            console.warn("Attempted to send notification but no active Chat ID found.");
+        }
+    } catch (e) {
+        console.error(`Failed to process outbox message ${filePath}:`, e);
+    } finally {
+        try { fs.unlinkSync(filePath); } catch {}
+    }
+}
+// ----------------------------------
 
 console.log(`Starting Telegram Bridge for pane ${targetPane}...`);
 
 bot.on(message('text'), async (ctx) => {
     const userMsg = ctx.message.text;
-    console.log(`Received: ${userMsg}`);
+    const chatId = ctx.chat.id.toString();
+    
+    // Update active chat ID
+    if (activeChatId !== chatId) {
+        activeChatId = chatId;
+        try {
+            fs.writeFileSync(CHAT_ID_FILE, activeChatId);
+        } catch (e) {
+            console.error("Failed to save Chat ID", e);
+        }
+    }
 
-    // Acquire lock to ensure exclusive control over the tmux pane interaction
+    console.log(`Received: ${userMsg} from ${chatId}`);
+
     if (await conversationLock.acquire()) {
         try {
-            // 1. Wait for pane stability (ensure previous turn is done)
             await tmux.waitForStability(targetPane);
-
-            // 2. Capture state before (optional, maybe just rely on message finding)
-            // const contentBefore = tmux.capturePane(targetPane);
-
-            // 3. Send message
             tmux.sendKeys(targetPane, userMsg);
             tmux.sendKeys(targetPane, 'Enter');
-
-            // 4. Wait for Gemini to process and reply
-            await tmux.waitForStability(targetPane, 3000, 500, 60000); // Wait up to 60s for reply
-
-            // 5. Capture state after (include history to handle scrolling)
+            await tmux.waitForStability(targetPane, 3000, 500, 60000);
+            
             const contentAfter = tmux.capturePane(targetPane, 200);
-
-            // 6. Diff / Extract
-            // Find the *last* occurrence of the user message. 
-            // This assumes the user message is unique enough or we just take the most recent one.
             const msgIndex = contentAfter.lastIndexOf(userMsg);
             let response = "";
             
             if (msgIndex !== -1) {
-                // Get text after the message
-                // + userMsg.length to skip the message itself
-                // + 1 usually for the newline if it was echoed with a newline
                 let rawResponse = contentAfter.substring(msgIndex + userMsg.length).trim();
-                
-                // optional: Strip the very last line if it looks like a prompt (e.g. ends with '$ ' or '> ')
-                // But this is risky. Let's just return the raw text for now.
                 response = rawResponse;
             } else {
-                // Fallback: If we can't find our message, return the last 20 lines (likely the new output)
                  response = tmux.capturePane(targetPane, 20);
             }
 
             if (response) {
-                // Telegram has a 4096 char limit. Truncate if needed.
                 if (response.length > 4000) {
                     response = response.substring(response.length - 4000);
                     response = "[...Truncated...]\n" + response;
@@ -91,6 +144,5 @@ bot.launch(() => {
     console.log("Telegram bot started.");
 });
 
-// Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

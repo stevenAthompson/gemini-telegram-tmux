@@ -56,6 +56,9 @@ gemini extension install https://github.com/stevenAthompson/gemini-telegram-tmux
 3.  **Chat**:
     Open your bot in Telegram and say "Hello!". You should see the message appear in your terminal, and the agent's response appear on your phone.
 
+4.  **Receive Notifications**:
+    Once you have messaged the bot, the agent can use `send_telegram_notification` to ping you proactively (e.g., "Build finished!").
+
 ## Troubleshooting
 
 *   **"Error: Could not determine current tmux pane"**: Ensure you are actually running inside a tmux session (use `./gemini_tmux.sh`).
@@ -67,3 +70,4 @@ This extension spawns a detached Node.js process that:
 1.  Long-polls the Telegram API.
 2.  Uses `tmux capture-pane` and `tmux send-keys` to interact with the shell.
 3.  Uses a file lock (`/tmp/gemini-telegram-bridge.lock`) to synchronize access.
+4.  Watches an "Outbox" directory (`/tmp/gemini_telegram_outbox`) to send proactive notifications from the agent.
