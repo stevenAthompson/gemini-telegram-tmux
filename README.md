@@ -13,6 +13,8 @@ This extension bridges your local Gemini CLI session to Telegram. It allows you 
 *   **Smart & Safe**: 
     *   Uses **Smart Injection** to type short messages naturally and paste long blocks instantly.
     *   Waits for **Screen Stability** so it never interrupts the agent while it's thinking or typing.
+    *   **Context Awareness**: Incoming messages are prefixed with `[Telegram]: ` so the agent knows the source.
+    *   **Mobile Optimized**: Automatically strips CLI garbage and adds double-spacing for readability on small screens.
     *   **Auto-Healing**: Automatically kills stale bridge processes on restart to ensure reliability.
 
 ## Prerequisites
