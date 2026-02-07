@@ -94,6 +94,7 @@ async function processOutboxMessage(filePath: string) {
 bot.on(message('text'), async (ctx) => {
     const userMsg = ctx.message.text;
     const chatId = ctx.chat.id.toString();
+    const msgId = ctx.message.message_id;
     
     if (activeChatId !== chatId) {
         activeChatId = chatId;
