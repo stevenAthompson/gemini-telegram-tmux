@@ -104,11 +104,10 @@ bot.on(message('text'), async (ctx) => {
         try {
             await tmux.waitForStability(targetPane);
             
-            // Type message
-            tmux.sendKeys(targetPane, userMsg);
+            // Type message (slowly, mimicking human input)
+            await tmux.typeText(targetPane, userMsg, 30);
             
-            // ROBUST ENTER SEQUENCE
-            // Send Enter, wait, Send Enter again to ensure submission
+            // Send Enter, wait, Send Enter again
             await new Promise(r => setTimeout(r, 200));
             tmux.sendKeys(targetPane, 'Enter');
             await new Promise(r => setTimeout(r, 200));
