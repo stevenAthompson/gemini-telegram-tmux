@@ -145,7 +145,7 @@ server.registerTool(
         // Ensure bridge is running
         if (!startBridge()) {
              return {
-                content: [{ type: 'text', text: 'Error: Telegram Bridge is not running. Has the user configured a bot token yet? Use configure_telegram.' }],
+                content: [{ type: 'text', text: 'Telegram Bridge is NOT configured.\n\nPlease ask the user for their Telegram Bot Token and run:\nconfigure_telegram bot_token="YOUR_TOKEN"' }],
                 isError: true
             };
         }

@@ -1,6 +1,6 @@
 {
   "name": "gemini-telegram-tmux",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A Gemini CLI extension that allows gemini to interact with telegram as if you were using the CLI by running the gemini cli instance inside tmux. Want real time communication? This is how you get it.",
   "author": "",
   "license": "MIT",
