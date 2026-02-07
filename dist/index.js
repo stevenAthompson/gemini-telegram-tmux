@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import * as fs from 'fs';
@@ -18,18 +18,27 @@ let bridgeProcess = null;
 const TOKEN_FILE = path.join(__dirname, '../.bot_token');
 const LOG_FILE = path.join(os.tmpdir(), 'gemini_telegram_bridge.log');
 const PID_FILE = path.join(os.tmpdir(), 'gemini_telegram_bridge.pid');
+/**
+ * Kills any existing bridge processes aggressively.
+ * Uses both PID file AND pattern matching to ensure no ghosts remain.
+ */
 function killExistingBridges() {
+    // 1. Kill by PID file (Primary method)
     if (fs.existsSync(PID_FILE)) {
         try {
             const pid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim(), 10);
             if (!isNaN(pid)) {
                 try {
                     process.kill(pid, 'SIGTERM');
-                    console.error(`Gemini-Telegram-Bridge: Killed existing bridge PID ${pid}`);
+                    console.error(`Gemini-Telegram-Bridge: Killed PID ${pid} from file.`);
                 }
                 catch (e) {
                     if (e.code !== 'ESRCH') {
-                        console.error(`Gemini-Telegram-Bridge: Failed to kill PID ${pid}:`, e);
+                        // Attempt SIGKILL if SIGTERM fails or permission denied
+                        try {
+                            process.kill(pid, 'SIGKILL');
+                        }
+                        catch { }
                     }
                 }
             }
@@ -42,21 +51,51 @@ function killExistingBridges() {
         }
         catch { }
     }
-}
-function startBridge() {
+    // 2. Kill by Pattern (Scorched Earth - handles zombies from previous installs)
     try {
-        if (bridgeProcess && !bridgeProcess.killed) {
-            return true;
+        const bridgeScript = path.join(__dirname, 'bridge.js');
+        // Find processes running this specific script
+        // We use pgrep -f to match the full command line
+        const cmd = `pgrep -f "node ${bridgeScript}"`;
+        const pids = execSync(cmd, { encoding: 'utf-8' }).trim().split('\n');
+        for (const pidStr of pids) {
+            const pid = parseInt(pidStr, 10);
+            if (!isNaN(pid) && pid !== process.pid) {
+                try {
+                    process.kill(pid, 'SIGKILL'); // Force kill ghosts
+                    console.error(`Gemini-Telegram-Bridge: Killed zombie PID ${pid} via pgrep.`);
+                }
+                catch (e) {
+                    // Ignore
+                }
+            }
         }
-        killExistingBridges();
-        const paneId = tmux.getPaneId();
-        if (!paneId) {
-            console.error("Gemini-Telegram-Bridge: Not running inside tmux. Bridge disabled.");
-            return false;
-        }
-        if (!fs.existsSync(TOKEN_FILE)) {
-            return false;
-        }
+    }
+    catch (e) {
+        // pgrep returns exit code 1 if no processes found. This is expected.
+    }
+}
+/**
+ * Internal helper to start the bridge process.
+ * Returns true if started or already running, false if configuration missing.
+ */
+function startBridge() {
+    if (bridgeProcess && !bridgeProcess.killed) {
+        return true;
+    }
+    // Kill zombies before starting new one
+    killExistingBridges();
+    // 1. Check Tmux
+    const paneId = tmux.getPaneId();
+    if (!paneId) {
+        console.error("Gemini-Telegram-Bridge: Not running inside tmux. Bridge disabled.");
+        return false;
+    }
+    // 2. Check Token
+    if (!fs.existsSync(TOKEN_FILE)) {
+        return false;
+    }
+    try {
         const token = fs.readFileSync(TOKEN_FILE, 'utf-8').trim();
         if (!token)
             return false;
@@ -92,16 +131,17 @@ catch (e) {
     console.error("Gemini-Telegram-Bridge: Critical startup error:", e);
 }
 server.registerTool('configure_telegram', {
-    description: 'Sets up the Telegram Bridge with a Bot Token. Use this when the user provides a token in chat.',
+    description: 'Sets up the Telegram Bridge with your Bot Token. Only needed once.',
     inputSchema: z.object({
-        bot_token: z.string().describe('The Telegram Bot API Token.'),
+        bot_token: z.string().describe('The Telegram Bot API Token obtained from @BotFather.'),
     }),
 }, async ({ bot_token }) => {
     try {
         fs.writeFileSync(TOKEN_FILE, bot_token, { encoding: 'utf-8', mode: 0o600 });
+        // Restart bridge with new token
         startBridge();
         return {
-            content: [{ type: 'text', text: `Configuration saved and bridge started successfully!` }]
+            content: [{ type: 'text', text: `Configuration saved and bridge started successfully!\nLogs: ${LOG_FILE}` }]
         };
     }
     catch (e) {
@@ -177,7 +217,7 @@ server.registerTool('send_telegram_notification', {
     try {
         fs.writeFileSync(filePath, JSON.stringify({ message }));
         return {
-            content: [{ type: 'text', text: `Notification queued.` }]
+            content: [{ type: 'text', text: `Notification queued (ID: ${msgId}).` }]
         };
     }
     catch (e) {
