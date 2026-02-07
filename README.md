@@ -25,14 +25,14 @@ This extension bridges your local Gemini CLI session to Telegram. It allows you 
 If you have the Gemini CLI installed, you can install this extension directly from GitHub:
 
 ```bash
-gemini install https://github.com/steven-thompson/gemini-telegram-tmux
+gemini install https://github.com/stevenAthompson/gemini-telegram-tmux
 ```
 *(Replace with the actual repository URL)*
 
 ### Option 2: Manual Installation
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/steven-thompson/gemini-telegram-tmux.git
+    git clone https://github.com/stevenAthompson/gemini-telegram-tmux.git
     cd gemini-telegram-tmux
     ```
 2.  Install dependencies and build:
