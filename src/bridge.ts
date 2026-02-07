@@ -65,6 +65,15 @@ function cleanOutput(text: string): string {
 
     // 3. Remove excessive blank lines (preserve single newlines)
     clean = clean.replace(/\n\s*\n/g, '\n');
+
+    // 4. Remove Gemini CLI Status Bar specific lines
+    // "Using: 8 GEMINI.md files..."
+    // "YOLO mode..."
+    // "Type your message..."
+    clean = clean.replace(/Using: \d+ GEMINI\.md files.*$/gm, "");
+    clean = clean.replace(/YOLO mode \(ctrl \+ y to toggle\).*$/gm, "");
+    clean = clean.replace(/\* +Type your message or @path\/to\/file.*$/gm, "");
+    clean = clean.replace(/~\/.*no sandbox.*Auto.*$/gm, ""); // Bottom path line
     
     return clean.trim();
 }
