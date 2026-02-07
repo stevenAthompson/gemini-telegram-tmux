@@ -74,18 +74,18 @@ export function sendKeys(target: string, keys: string) {
 export async function typeText(target: string, text: string, delayMs: number = 20) {
     const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-    // Clear line first (optional, but safer)
-    // _exec.execSync(`tmux send-keys -t ${target} Escape C-u`);
-    // await delay(100);
+    // Clear line first: Escape (cancel current), C-u (clear line), C-k (clear forward)
+    // We send them individually to be safe
+    _exec.execSync(`tmux send-keys -t ${target} Escape`);
+    await delay(50);
+    _exec.execSync(`tmux send-keys -t ${target} C-u`);
+    await delay(50);
+    _exec.execSync(`tmux send-keys -t ${target} C-k`);
+    await delay(100);
 
     for (const char of text) {
         let key = char;
-        // Escape single quote for shell
         if (key === "'") key = "'\\''";
-        
-        // Handle special chars if needed, but usually literal is fine for send-keys
-        // except for Space which might be treated as argument separator if not quoted?
-        // tmux send-keys handles most.
         
         try {
             _exec.execSync(`tmux send-keys -t ${target} '${key}'`);
