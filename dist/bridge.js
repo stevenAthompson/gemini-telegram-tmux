@@ -11,17 +11,24 @@ if (!token || !targetPane) {
     console.error("Missing TELEGRAM_BOT_TOKEN or TARGET_PANE env vars");
     process.exit(1);
 }
+// PID File Management
+const TMP_DIR = os.tmpdir();
+const PID_FILE = path.join(TMP_DIR, 'gemini_telegram_bridge.pid');
+try {
+    fs.writeFileSync(PID_FILE, process.pid.toString());
+    console.log(`Bridge started. PID: ${process.pid}`);
+}
+catch (e) {
+    console.error("Failed to write PID file:", e);
+}
 const bot = new Telegraf(token);
 const conversationLock = new FileLock('gemini-telegram-bridge', 500, 10);
-// -- Persistence and Outbox Logic --
-const TMP_DIR = os.tmpdir();
 const CHAT_ID_FILE = path.join(TMP_DIR, 'gemini_telegram_chat_id.txt');
 const OUTBOX_DIR = path.join(TMP_DIR, 'gemini_telegram_outbox');
 if (!fs.existsSync(OUTBOX_DIR)) {
     fs.mkdirSync(OUTBOX_DIR);
 }
 let activeChatId = null;
-// Load previous chat ID if exists
 if (fs.existsSync(CHAT_ID_FILE)) {
     try {
         activeChatId = fs.readFileSync(CHAT_ID_FILE, 'utf-8').trim();
@@ -31,19 +38,29 @@ if (fs.existsSync(CHAT_ID_FILE)) {
         console.error("Failed to load chat ID file", e);
     }
 }
-// Watch Outbox for new messages from Gemini
+else {
+    console.log("No saved Chat ID found. Waiting for incoming message...");
+}
 fs.watch(OUTBOX_DIR, (eventType, filename) => {
     if (eventType === 'rename' && filename) {
         const filePath = path.join(OUTBOX_DIR, filename);
-        if (fs.existsSync(filePath)) {
-            // Wait slightly to ensure write complete? usually atomic rename is better but simple write might be racey.
-            // But if the tool writes then close, it should be fine.
-            // Let's add a small delay or retry.
-            setTimeout(() => processOutboxMessage(filePath), 100);
-        }
+        setTimeout(() => processOutboxMessage(filePath), 100);
     }
 });
+function cleanOutput(text) {
+    // 1. Strip ANSI escape codes
+    // eslint-disable-next-line no-control-regex
+    let clean = text.replace(/\x1B\[\d+;?\d*m/g, "");
+    // 2. Aggressively strip box-drawing, UI chars, and common loader symbols
+    // Grouped for efficiency
+    clean = clean.replace(/[│─╭╮╰╯─╼╽╾╿┌┐└┘├┤┬┴┼═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏•✓✖⚠]/g, "");
+    // 3. Remove excessive blank lines (preserve single newlines)
+    clean = clean.replace(/\n\s*\n/g, '\n');
+    return clean.trim();
+}
 async function processOutboxMessage(filePath) {
+    if (!fs.existsSync(filePath))
+        return;
     try {
         const content = fs.readFileSync(filePath, 'utf-8');
         let msg = "";
@@ -52,22 +69,20 @@ async function processOutboxMessage(filePath) {
             msg = json.message;
         }
         catch {
-            msg = content; // Fallback to raw text
+            msg = content;
         }
         if (activeChatId) {
-            // Split long messages
-            if (msg.length > 4000) {
-                const chunks = msg.match(/.{1,4000}/g) || [];
+            const cleanMsg = cleanOutput(msg);
+            console.log(`Sending notification: ${cleanMsg.substring(0, 50)}...`);
+            if (cleanMsg.length > 4000) {
+                const chunks = cleanMsg.match(/.{1,4000}/g) || [];
                 for (const chunk of chunks) {
                     await bot.telegram.sendMessage(activeChatId, chunk);
                 }
             }
             else {
-                await bot.telegram.sendMessage(activeChatId, msg);
+                await bot.telegram.sendMessage(activeChatId, cleanMsg);
             }
-        }
-        else {
-            console.warn("Attempted to send notification but no active Chat ID found.");
         }
     }
     catch (e) {
@@ -77,47 +92,54 @@ async function processOutboxMessage(filePath) {
         try {
             fs.unlinkSync(filePath);
         }
-        catch { }
+        catch { } // eslint-disable-line no-empty
     }
 }
-// ----------------------------------
-console.log(`Starting Telegram Bridge for pane ${targetPane}...`);
 bot.on(message('text'), async (ctx) => {
     const userMsg = ctx.message.text;
     const chatId = ctx.chat.id.toString();
-    // Update active chat ID
+    const msgId = ctx.message.message_id;
     if (activeChatId !== chatId) {
         activeChatId = chatId;
         try {
             fs.writeFileSync(CHAT_ID_FILE, activeChatId);
         }
-        catch (e) {
-            console.error("Failed to save Chat ID", e);
-        }
+        catch { } // eslint-disable-line no-empty
     }
-    console.log(`Received: ${userMsg} from ${chatId}`);
+    console.log(`[Msg ${msgId}] Received: "${userMsg}"`);
     if (await conversationLock.acquire()) {
         try {
             await tmux.waitForStability(targetPane);
-            tmux.sendKeys(targetPane, userMsg);
-            tmux.sendKeys(targetPane, 'Enter');
-            await tmux.waitForStability(targetPane, 3000, 500, 60000);
-            const contentAfter = tmux.capturePane(targetPane, 200);
+            console.log(`[Msg ${msgId}] Injecting message...`);
+            await tmux.injectCommand(targetPane, userMsg);
+            console.log(`[Msg ${msgId}] Waiting for response...`);
+            // Reduce timeout to 20s to be more responsive/fail-fast
+            await tmux.waitForStability(targetPane, 3000, 500, 20000);
+            let contentAfter = tmux.capturePane(targetPane, 200);
+            // Remove the last 5 lines (Status bar, prompts) to avoid garbage
+            const lines = contentAfter.split('\n');
+            if (lines.length > 5) {
+                contentAfter = lines.slice(0, -5).join('\n');
+            }
             const msgIndex = contentAfter.lastIndexOf(userMsg);
             let response = "";
             if (msgIndex !== -1) {
-                let rawResponse = contentAfter.substring(msgIndex + userMsg.length).trim();
-                response = rawResponse;
+                response = contentAfter.substring(msgIndex + userMsg.length).trim();
             }
             else {
-                response = tmux.capturePane(targetPane, 20);
+                // If we can't find our message, take the last 20 lines (of the trimmed content)
+                const lastLines = lines.slice(0, -5).slice(-20).join('\n');
+                response = lastLines;
             }
             if (response) {
-                if (response.length > 4000) {
-                    response = response.substring(response.length - 4000);
-                    response = "[...Truncated...]\n" + response;
+                const cleanResponse = cleanOutput(response);
+                if (cleanResponse.length > 4000) {
+                    const truncated = cleanResponse.substring(cleanResponse.length - 4000);
+                    await ctx.reply("[...Truncated...]\n" + truncated);
                 }
-                await ctx.reply(response);
+                else {
+                    await ctx.reply(cleanResponse || "(Output was empty after cleaning)");
+                }
             }
             else {
                 await ctx.reply("(No output detected)");
@@ -125,18 +147,28 @@ bot.on(message('text'), async (ctx) => {
         }
         catch (e) {
             console.error(e);
-            await ctx.reply(`Error bridging message: ${e.message}`);
+            await ctx.reply(`Error: ${e.message}`);
         }
         finally {
             conversationLock.release();
         }
     }
     else {
-        await ctx.reply("System is busy. Please try again.");
+        await ctx.reply("System is busy.");
     }
 });
-bot.launch(() => {
-    console.log("Telegram bot started.");
+bot.launch();
+process.once('SIGINT', () => {
+    try {
+        fs.unlinkSync(PID_FILE);
+    }
+    catch { } // eslint-disable-line no-empty
+    bot.stop('SIGINT');
 });
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGTERM', () => {
+    try {
+        fs.unlinkSync(PID_FILE);
+    }
+    catch { } // eslint-disable-line no-empty
+    bot.stop('SIGTERM');
+});
