@@ -26,7 +26,6 @@ server.registerTool(
     }),
   },
   async ({ bot_token }) => {
-    // 1. Check Tmux Environment
     const paneId = tmux.getPaneId();
     if (!paneId) {
         return {
@@ -46,21 +45,16 @@ Or manually start tmux:
         };
     }
 
-    // 2. Resolve Token Persistence
-    // Save in the extension root (one level up from dist/)
     const tokenFile = path.join(__dirname, '../.bot_token');
     let effectiveToken = bot_token;
 
     if (effectiveToken) {
-        // User provided a token, save it for future use
         try {
             fs.writeFileSync(tokenFile, effectiveToken, { encoding: 'utf-8', mode: 0o600 });
         } catch (e) {
-            // Ignore write errors (maybe permissions), just warn in logs
             console.error("Failed to save .bot_token", e);
         }
     } else {
-        // Try to load from file
         if (fs.existsSync(tokenFile)) {
             try {
                 effectiveToken = fs.readFileSync(tokenFile, 'utf-8').trim();
@@ -96,24 +90,30 @@ start_telegram_bridge
 
     const logFile = path.join(os.tmpdir(), 'gemini_telegram_bridge.log');
 
-    // Spawn detached process
     const child = spawn('node', [bridgeScript], {
         detached: true,
-        stdio: ['ignore', 'ignore', 'ignore'],
+        stdio: ['ignore', 'ignore', 'ignore'], // We recommend redirecting to logFile manually for debugging
+        // Actually, let's redirect stdout/stderr to the log file for real debugging
+    });
+    
+    // Proper log redirection
+    const logStream = fs.openSync(logFile, 'a');
+    const childProcess = spawn('node', [bridgeScript], {
+        detached: true,
+        stdio: ['ignore', logStream, logStream],
         env: {
             ...process.env,
             TELEGRAM_BOT_TOKEN: effectiveToken,
             TARGET_PANE: paneId
         }
     });
-
-    child.unref();
+    childProcess.unref();
 
     return {
       content: [
         {
           type: 'text',
-          text: `Telegram bridge started! (PID: ${child.pid})\nTarget Pane: ${paneId}\nLogs: ${logFile}`,
+          text: `Telegram bridge started! (PID: ${childProcess.pid})\nTarget Pane: ${paneId}\nLogs: ${logFile}`,
         },
       ],
     };
@@ -129,7 +129,9 @@ server.registerTool(
         }),
     },
     async ({ message }) => {
-        const OUTBOX_DIR = path.join(os.tmpdir(), 'gemini_telegram_outbox');
+        const TMP_DIR = os.tmpdir();
+        const OUTBOX_DIR = path.join(TMP_DIR, 'gemini_telegram_outbox');
+        const CHAT_ID_FILE = path.join(TMP_DIR, 'gemini_telegram_chat_id.txt');
         
         if (!fs.existsSync(OUTBOX_DIR)) {
              return {
@@ -138,13 +140,22 @@ server.registerTool(
             };
         }
 
-        const filename = `msg_${Date.now()}_${Math.random().toString(36).substring(7)}.json`;
+        // Check if we have a user to send to
+        if (!fs.existsSync(CHAT_ID_FILE)) {
+            return {
+                content: [{ type: 'text', text: 'Error: No active Telegram user found. Please send a message to the bot from your Telegram app first to establish a connection.' }],
+                isError: true
+            };
+        }
+
+        const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        const filename = `${msgId}.json`;
         const filePath = path.join(OUTBOX_DIR, filename);
 
         try {
             fs.writeFileSync(filePath, JSON.stringify({ message }));
             return {
-                content: [{ type: 'text', text: 'Notification queued.' }]
+                content: [{ type: 'text', text: `Notification queued (ID: ${msgId}).` }]
             };
         } catch (e: any) {
             return {
