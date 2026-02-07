@@ -73,7 +73,7 @@ export function capturePane(target: string, lines?: number): string {
     if (lines) {
         cmd += ` -S -${lines}`;
     }
-    return execSync(cmd, { encoding: 'utf-8' });
+    return _exec.execSync(cmd).toString();
 }
 
 /**
@@ -85,20 +85,20 @@ export async function injectCommand(target: string, message: string) {
 
     // Clear input
     try {
-        execSync(`tmux send-keys -t ${target} Escape`, { encoding: 'utf-8' });
+        _exec.execSync(`tmux send-keys -t ${target} Escape`);
         await delay(100);
-        execSync(`tmux send-keys -t ${target} C-u`, { encoding: 'utf-8' });
+        _exec.execSync(`tmux send-keys -t ${target} C-u`);
         await delay(200);
 
         for (const char of message) {
             const escapedChar = char === "'" ? "'\\''" : char;
-            execSync(`tmux send-keys -t ${target} '${escapedChar}'`, { encoding: 'utf-8' });
+            _exec.execSync(`tmux send-keys -t ${target} '${escapedChar}'`);
             await delay(20);
         }
         await delay(500);
-        execSync(`tmux send-keys -t ${target} Enter`, { encoding: 'utf-8' });
+        _exec.execSync(`tmux send-keys -t ${target} Enter`);
         await delay(500);
-        execSync(`tmux send-keys -t ${target} Enter`, { encoding: 'utf-8' });
+        _exec.execSync(`tmux send-keys -t ${target} Enter`);
     } catch (e) {
         console.error(`Failed to inject command via tmux: ${e}`);
         throw e;
