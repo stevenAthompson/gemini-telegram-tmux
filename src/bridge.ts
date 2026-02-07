@@ -173,11 +173,7 @@ bot.on(message('text'), async (ctx) => {
     }
 });
 
-bot.launch({
-    // Increase handler timeout to avoid crashes on long running CLI tasks
-    // Default is 90s. We set to 5 minutes.
-    handlerTimeout: 300_000
-});
+bot.launch();
 
 process.once('SIGINT', () => {
     try { fs.unlinkSync(PID_FILE); } catch {} // eslint-disable-line no-empty
