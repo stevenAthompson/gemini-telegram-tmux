@@ -11,15 +11,28 @@ if (!token || !targetPane) {
     console.error("Missing TELEGRAM_BOT_TOKEN or TARGET_PANE env vars");
     process.exit(1);
 }
-// PID File Management
+// PID File Management & Singleton Check
 const TMP_DIR = os.tmpdir();
 const PID_FILE = path.join(TMP_DIR, 'gemini_telegram_bridge.pid');
 try {
+    if (fs.existsSync(PID_FILE)) {
+        const existingPid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim(), 10);
+        if (!isNaN(existingPid)) {
+            try {
+                process.kill(existingPid, 0); // Check if running
+                console.error(`Bridge already running (PID ${existingPid}). Aborting.`);
+                process.exit(0);
+            }
+            catch (e) {
+                // Process not running, stale file. Overwrite it.
+            }
+        }
+    }
     fs.writeFileSync(PID_FILE, process.pid.toString());
     console.log(`Bridge started. PID: ${process.pid}`);
 }
 catch (e) {
-    console.error("Failed to write PID file:", e);
+    console.error("Failed to manage PID file:", e);
 }
 const bot = new Telegraf(token);
 const conversationLock = new FileLock('gemini-telegram-bridge', 500, 10);
@@ -42,9 +55,10 @@ else {
     console.log("No saved Chat ID found. Waiting for incoming message...");
 }
 fs.watch(OUTBOX_DIR, (eventType, filename) => {
-    if (eventType === 'rename' && filename) {
+    if (eventType === 'rename' && filename && !filename.endsWith('.processing')) {
         const filePath = path.join(OUTBOX_DIR, filename);
-        setTimeout(() => processOutboxMessage(filePath), 100);
+        // Small delay to ensure write complete, but use locking
+        setTimeout(() => processOutboxMessage(filePath), 50);
     }
 });
 function cleanOutput(text) {
@@ -65,8 +79,16 @@ function cleanOutput(text) {
 async function processOutboxMessage(filePath) {
     if (!fs.existsSync(filePath))
         return;
+    // ATOMIC LOCK: Rename to .processing to claim ownership
+    const processingPath = filePath + '.processing';
     try {
-        const content = fs.readFileSync(filePath, 'utf-8');
+        fs.renameSync(filePath, processingPath);
+    }
+    catch (e) {
+        return; // Failed to rename (already taken or gone), abort
+    }
+    try {
+        const content = fs.readFileSync(processingPath, 'utf-8');
         let msg = "";
         try {
             const json = JSON.parse(content);
@@ -90,13 +112,13 @@ async function processOutboxMessage(filePath) {
         }
     }
     catch (e) {
-        console.error(`Failed to process outbox message ${filePath}:`, e);
+        console.error(`Failed to process outbox message ${processingPath}:`, e);
     }
     finally {
         try {
-            fs.unlinkSync(filePath);
+            fs.unlinkSync(processingPath);
         }
-        catch { } // eslint-disable-line no-empty
+        catch { } // Ignore errors during cleanup
     }
 }
 bot.on(message('text'), async (ctx) => {
@@ -104,21 +126,17 @@ bot.on(message('text'), async (ctx) => {
     const chatId = ctx.chat.id.toString();
     const msgId = ctx.message.message_id;
     // Safety: Prevent accidental shell mode trigger in Gemini CLI
-    // An '!' at the start of a line often forces shell execution.
-    // We prepend a space to neutralize it while keeping the message readable.
-    // Also prepend [Telegram] context.
     const prefix = "[Telegram]: ";
     userMsg = userMsg.split('\n')
         .map(line => line.startsWith('!') ? ' ' + line : line)
         .join('\n');
-    // Combine
     const finalMsg = `${prefix}${userMsg}`;
     if (activeChatId !== chatId) {
         activeChatId = chatId;
         try {
             fs.writeFileSync(CHAT_ID_FILE, activeChatId);
         }
-        catch { } // eslint-disable-line no-empty
+        catch { } // Ignore errors during save
     }
     console.log(`[Msg ${msgId}] Received: "${userMsg}"`);
     if (await conversationLock.acquire()) {
@@ -134,14 +152,12 @@ bot.on(message('text'), async (ctx) => {
             if (lines.length > 5) {
                 contentAfter = lines.slice(0, -5).join('\n');
             }
-            // We look for the ECHO of what we typed to find where the response starts
             const msgIndex = contentAfter.lastIndexOf(finalMsg);
             let response = "";
             if (msgIndex !== -1) {
                 response = contentAfter.substring(msgIndex + finalMsg.length).trim();
             }
             else {
-                // If we can't find our message, take the last 20 lines (of the trimmed content)
                 const lastLines = lines.slice(0, -5).slice(-20).join('\n');
                 response = lastLines;
             }
@@ -176,13 +192,13 @@ process.once('SIGINT', () => {
     try {
         fs.unlinkSync(PID_FILE);
     }
-    catch { } // eslint-disable-line no-empty
+    catch { } // Ignore errors during cleanup
     bot.stop('SIGINT');
 });
 process.once('SIGTERM', () => {
     try {
         fs.unlinkSync(PID_FILE);
     }
-    catch { } // eslint-disable-line no-empty
+    catch { } // Ignore errors during cleanup
     bot.stop('SIGTERM');
 });
