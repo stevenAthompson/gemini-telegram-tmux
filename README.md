@@ -22,12 +22,9 @@ This extension bridges your local Gemini CLI session to Telegram. It allows you 
 ## Installation
 
 ### Option 1: Via Gemini CLI (Recommended)
-If you have the Gemini CLI installed, you can install this extension directly from GitHub:
-
 ```bash
-gemini install https://github.com/stevenAthompson/gemini-telegram-tmux
+gemini extension install https://github.com/stevenAthompson/gemini-telegram-tmux
 ```
-*(Replace with the actual repository URL)*
 
 ### Option 2: Manual Installation
 1.  Clone the repository:
@@ -40,16 +37,15 @@ gemini install https://github.com/stevenAthompson/gemini-telegram-tmux
     npm install
     npm run build
     ```
-3.  Add it to your Gemini config manually.
 
 ## Usage
 
 1.  **Start Gemini in Tmux**:
-    Open your terminal and create a new session (or attach to an existing one):
+    We provide a helper script to launch Gemini in a properly named tmux session:
     ```bash
-    tmux new -s gemini-cli
-    gemini
+    ./gemini_tmux.sh
     ```
+    *(Alternatively: `tmux new -s gemini-cli gemini`)*
 
 2.  **Connect the Bridge**:
     Inside the Gemini CLI, tell the agent to start the bridge:
@@ -62,7 +58,7 @@ gemini install https://github.com/stevenAthompson/gemini-telegram-tmux
 
 ## Troubleshooting
 
-*   **"Error: Could not determine current tmux pane"**: Ensure you are actually running inside a tmux session.
+*   **"Error: Could not determine current tmux pane"**: Ensure you are actually running inside a tmux session (use `./gemini_tmux.sh`).
 *   **No response on Telegram**: Check the logs at the path returned by the tool (usually `/tmp/gemini_telegram_bridge.log` or similar).
 *   **Garbled text**: Avoid typing furiously in the terminal window while simultaneously sending messages from Telegram. The bridge tries to be polite (waiting for idle time), but race conditions are possible if you fight it.
 
