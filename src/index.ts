@@ -22,9 +22,6 @@ const TOKEN_FILE = path.join(__dirname, '../.bot_token');
 const LOG_FILE = path.join(os.tmpdir(), 'gemini_telegram_bridge.log');
 const PID_FILE = path.join(os.tmpdir(), 'gemini_telegram_bridge.pid');
 
-/**
- * Kills any existing bridge processes using the PID file.
- */
 function killExistingBridges() {
     if (fs.existsSync(PID_FILE)) {
         try {
@@ -42,36 +39,28 @@ function killExistingBridges() {
         } catch (e) {
             console.error("Gemini-Telegram-Bridge: Error reading PID file:", e);
         }
-        // Clean up file
         try { fs.unlinkSync(PID_FILE); } catch {}
     }
 }
 
-/**
- * Internal helper to start the bridge process.
- * Returns true if started or already running, false if configuration missing.
- */
 function startBridge(): boolean {
-    if (bridgeProcess && !bridgeProcess.killed) {
-        return true;
-    }
-
-    // Kill zombies before starting new one
-    killExistingBridges();
-
-    // 1. Check Tmux
-    const paneId = tmux.getPaneId();
-    if (!paneId) {
-        console.error("Gemini-Telegram-Bridge: Not running inside tmux. Bridge disabled.");
-        return false;
-    }
-
-    // 2. Check Token
-    if (!fs.existsSync(TOKEN_FILE)) {
-        return false;
-    }
-
     try {
+        if (bridgeProcess && !bridgeProcess.killed) {
+            return true;
+        }
+
+        killExistingBridges();
+
+        const paneId = tmux.getPaneId();
+        if (!paneId) {
+            console.error("Gemini-Telegram-Bridge: Not running inside tmux. Bridge disabled.");
+            return false;
+        }
+
+        if (!fs.existsSync(TOKEN_FILE)) {
+            return false;
+        }
+
         const token = fs.readFileSync(TOKEN_FILE, 'utf-8').trim();
         if (!token) return false;
 
@@ -102,28 +91,28 @@ function startBridge(): boolean {
     }
 }
 
-// Attempt auto-start on load
-startBridge();
+// SAFE STARTUP
+try {
+    startBridge();
+} catch (e) {
+    console.error("Gemini-Telegram-Bridge: Critical startup error:", e);
+}
 
 server.registerTool(
   'configure_telegram',
   {
-    description: 'Sets up the Telegram Bridge with your Bot Token. Only needed once.',
+    description: 'Sets up the Telegram Bridge with a Bot Token. Use this when the user provides a token in chat.',
     inputSchema: z.object({
-      bot_token: z.string().describe('The Telegram Bot API Token obtained from @BotFather.'),
+      bot_token: z.string().describe('The Telegram Bot API Token.'),
     }),
   },
   async ({ bot_token }) => {
     try {
         fs.writeFileSync(TOKEN_FILE, bot_token, { encoding: 'utf-8', mode: 0o600 });
-        
-        // Restart bridge with new token
         startBridge();
-        
         return {
-            content: [{ type: 'text', text: `Configuration saved and bridge started successfully!\nLogs: ${LOG_FILE}` }]
+            content: [{ type: 'text', text: `Configuration saved and bridge started successfully!` }]
         };
-
     } catch (e: any) {
         return {
             content: [{ type: 'text', text: `Failed to save configuration: ${e.message}` }],
@@ -131,6 +120,44 @@ server.registerTool(
         };
     }
   },
+);
+
+server.registerTool(
+    'check_telegram_status',
+    {
+        description: 'Checks if the Telegram Bridge is configured and running. Use this to diagnose connection issues or prompt the user for setup.',
+        inputSchema: z.object({}),
+    },
+    async () => {
+        const configured = fs.existsSync(TOKEN_FILE);
+        const running = bridgeProcess && !bridgeProcess.killed;
+        const chatIdFile = path.join(os.tmpdir(), 'gemini_telegram_chat_id.txt');
+        const connected = fs.existsSync(chatIdFile);
+
+        let statusMsg = "Status:\n";
+        statusMsg += `- Configured: ${configured ? 'Yes' : 'No'}\n`;
+        statusMsg += `- Running: ${running ? 'Yes' : 'No'}\n`;
+        statusMsg += `- Connected (Chat ID): ${connected ? 'Yes' : 'No'}\n`;
+
+        if (!configured) {
+            statusMsg += "\nACTION REQUIRED: Ask the user for their Telegram Bot Token and use 'configure_telegram'.";
+        } else if (!running) {
+            statusMsg += "\nACTION REQUIRED: Bridge configured but not running. Trying to restart...";
+            if (startBridge()) {
+                statusMsg += " Restarted successfully.";
+            } else {
+                statusMsg += " Restart failed. Check logs.";
+            }
+        } else if (!connected) {
+            statusMsg += "\nACTION REQUIRED: Bridge is running but no user has messaged the bot yet. Ask the user to send 'Hello' to the bot on Telegram.";
+        } else {
+            statusMsg += "\nSystem is healthy.";
+        }
+
+        return {
+            content: [{ type: 'text', text: statusMsg }]
+        };
+    }
 );
 
 server.registerTool(
@@ -142,7 +169,6 @@ server.registerTool(
         }),
     },
     async ({ message }) => {
-        // Ensure bridge is running
         if (!startBridge()) {
              return {
                 content: [{ type: 'text', text: 'Telegram Bridge is NOT configured.\n\nPlease ask the user for their Telegram Bot Token and run:\nconfigure_telegram bot_token="YOUR_TOKEN"' }],
@@ -171,7 +197,7 @@ server.registerTool(
         try {
             fs.writeFileSync(filePath, JSON.stringify({ message }));
             return {
-                content: [{ type: 'text', text: `Notification queued (ID: ${msgId}).` }]
+                content: [{ type: 'text', text: `Notification queued.` }]
             };
         } catch (e: any) {
             return {
