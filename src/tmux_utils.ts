@@ -3,6 +3,7 @@ import { FileLock } from './file_lock.js';
 
 export const SESSION_NAME = process.env.GEMINI_TMUX_SESSION_NAME || 'gemini-cli';
 
+// Internal exec wrapper (kept for consistency/mocking, but sendNotification uses execSync directly in reference)
 export const _exec = {
     execSync: (cmd: string) => execSync(cmd, { encoding: 'utf-8' })
 };
@@ -12,7 +13,7 @@ export function isInsideTmuxSession(): boolean {
     return false;
   }
   try {
-    const currentSessionName = _exec.execSync('tmux display-message -p "#S"').trim();
+    const currentSessionName = execSync('tmux display-message -p "#S"', { encoding: 'utf-8' }).trim();
     return currentSessionName === SESSION_NAME;
   } catch (error) {
     return false;
@@ -21,7 +22,7 @@ export function isInsideTmuxSession(): boolean {
 
 export function getPaneId(): string {
     try {
-        return _exec.execSync('tmux display-message -p "#{pane_id}"').trim();
+        return execSync('tmux display-message -p "#{pane_id}"', { encoding: 'utf-8' }).trim();
     } catch (e) {
         return '';
     }
@@ -40,8 +41,8 @@ export async function waitForStability(target: string, stableDurationMs: number 
         
         let currentContent = '';
         try {
-            const textContent = _exec.execSync(`tmux capture-pane -p -t ${target}`);
-            const cursorPosition = _exec.execSync(`tmux display-message -p -t ${target} "#{cursor_x},#{cursor_y}"`).trim();
+            const textContent = execSync(`tmux capture-pane -p -t ${target}`, { encoding: 'utf-8' });
+            const cursorPosition = execSync(`tmux display-message -p -t ${target} "#{cursor_x},#{cursor_y}"`, { encoding: 'utf-8' }).trim();
             currentContent = `${textContent}
 __CURSOR__:${cursorPosition}`;
         } catch (e) {
@@ -64,39 +65,7 @@ __CURSOR__:${cursorPosition}`;
 
 export function sendKeys(target: string, keys: string) {
     const escapedKeys = keys.replace(/'/g, "'\\''");
-    _exec.execSync(`tmux send-keys -t ${target} '${escapedKeys}'`);
-}
-
-/**
- * Injects a message atomically into the pane: Clear -> Type -> Enter -> Enter.
- * Exactly matches the reference 'sendNotification' logic.
- */
-export async function injectMessage(target: string, text: string) {
-    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-    // 1. Clear Input
-    _exec.execSync(`tmux send-keys -t ${target} Escape`);
-    await delay(100);
-    _exec.execSync(`tmux send-keys -t ${target} C-u`);
-    await delay(200);
-
-    // 2. Type Character by Character
-    for (const char of text) {
-        let key = char;
-        if (key === "'") key = "'\\''";
-        try {
-            _exec.execSync(`tmux send-keys -t ${target} '${key}'`);
-        } catch (e) {
-            // ignore
-        }
-        await delay(20); // 20ms delay per char (reference default)
-    }
-
-    // 3. Submit
-    await delay(500);
-    _exec.execSync(`tmux send-keys -t ${target} Enter`);
-    await delay(500);
-    _exec.execSync(`tmux send-keys -t ${target} Enter`);
+    execSync(`tmux send-keys -t ${target} '${escapedKeys}'`, { encoding: 'utf-8' });
 }
 
 export function capturePane(target: string, lines?: number): string {
@@ -104,5 +73,34 @@ export function capturePane(target: string, lines?: number): string {
     if (lines) {
         cmd += ` -S -${lines}`;
     }
-    return _exec.execSync(cmd);
+    return execSync(cmd, { encoding: 'utf-8' });
+}
+
+/**
+ * Injects a command into the tmux pane using the exact logic from the reference implementation.
+ * Clears line, types slowly, and double-enters.
+ */
+export async function injectCommand(target: string, message: string) {
+    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // Clear input
+    try {
+        execSync(`tmux send-keys -t ${target} Escape`, { encoding: 'utf-8' });
+        await delay(100);
+        execSync(`tmux send-keys -t ${target} C-u`, { encoding: 'utf-8' });
+        await delay(200);
+
+        for (const char of message) {
+            const escapedChar = char === "'" ? "'\\''" : char;
+            execSync(`tmux send-keys -t ${target} '${escapedChar}'`, { encoding: 'utf-8' });
+            await delay(20);
+        }
+        await delay(500);
+        execSync(`tmux send-keys -t ${target} Enter`, { encoding: 'utf-8' });
+        await delay(500);
+        execSync(`tmux send-keys -t ${target} Enter`, { encoding: 'utf-8' });
+    } catch (e) {
+        console.error(`Failed to inject command via tmux: ${e}`);
+        throw e;
+    }
 }

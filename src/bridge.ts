@@ -116,7 +116,7 @@ bot.on(message('text'), async (ctx) => {
             await tmux.waitForStability(targetPane);
             
             console.log(`[Msg ${msgId}] Injecting message...`);
-            await tmux.injectMessage(targetPane, userMsg);
+            await tmux.injectCommand(targetPane, userMsg);
             
             console.log(`[Msg ${msgId}] Waiting for response...`);
             await tmux.waitForStability(targetPane, 3000, 500, 60000);
