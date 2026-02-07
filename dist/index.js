@@ -17,13 +17,64 @@ const server = new McpServer({
 server.registerTool('start_telegram_bridge', {
     description: 'Starts a background bridge that forwards Telegram messages to the current Gemini tmux session and returns responses.',
     inputSchema: z.object({
-        bot_token: z.string().describe('The Telegram Bot API Token.'),
+        bot_token: z.string().optional().describe('The Telegram Bot API Token. Optional if previously saved.'),
     }),
 }, async ({ bot_token }) => {
+    // 1. Check Tmux Environment
     const paneId = tmux.getPaneId();
     if (!paneId) {
         return {
-            content: [{ type: 'text', text: 'Error: Could not determine current tmux pane. Are you running inside tmux?' }],
+            content: [{ type: 'text', text: `
+Error: Gemini is not running inside a tmux session.
+This extension requires tmux to function safely.
+
+To fix this:
+1. Exit the current session.
+2. Run the included helper script:
+   ./gemini_tmux.sh
+
+Or manually start tmux:
+   tmux new -s gemini-cli gemini
+            ` }],
+            isError: true
+        };
+    }
+    // 2. Resolve Token Persistence
+    // Save in the extension root (one level up from dist/)
+    const tokenFile = path.join(__dirname, '../.bot_token');
+    let effectiveToken = bot_token;
+    if (effectiveToken) {
+        // User provided a token, save it for future use
+        try {
+            fs.writeFileSync(tokenFile, effectiveToken, { encoding: 'utf-8', mode: 0o600 });
+        }
+        catch (e) {
+            // Ignore write errors (maybe permissions), just warn in logs
+            console.error("Failed to save .bot_token", e);
+        }
+    }
+    else {
+        // Try to load from file
+        if (fs.existsSync(tokenFile)) {
+            try {
+                effectiveToken = fs.readFileSync(tokenFile, 'utf-8').trim();
+            }
+            catch (e) {
+                console.error("Failed to read .bot_token", e);
+            }
+        }
+    }
+    if (!effectiveToken) {
+        return {
+            content: [{ type: 'text', text: `
+Error: No Telegram Bot Token provided.
+
+Please run the command with your token once to save it:
+start_telegram_bridge bot_token="123456:ABC-DEF..."
+
+On future runs, you can simply call:
+start_telegram_bridge
+            ` }],
             isError: true
         };
     }
@@ -38,10 +89,10 @@ server.registerTool('start_telegram_bridge', {
     // Spawn detached process
     const child = spawn('node', [bridgeScript], {
         detached: true,
-        stdio: ['ignore', 'ignore', 'ignore'], // We could redirect to log file for debugging
+        stdio: ['ignore', 'ignore', 'ignore'],
         env: {
             ...process.env,
-            TELEGRAM_BOT_TOKEN: bot_token,
+            TELEGRAM_BOT_TOKEN: effectiveToken,
             TARGET_PANE: paneId
         }
     });
@@ -50,10 +101,38 @@ server.registerTool('start_telegram_bridge', {
         content: [
             {
                 type: 'text',
-                text: `Telegram bridge started! (PID: ${child.pid})\nTarget Pane: ${paneId}\nLogs: ${logFile} (Not enabled in code yet, check stdout/stderr if not detached)`,
+                text: `Telegram bridge started! (PID: ${child.pid})\nTarget Pane: ${paneId}\nLogs: ${logFile}`,
             },
         ],
     };
+});
+server.registerTool('send_telegram_notification', {
+    description: 'Sends a message to the connected Telegram user. Requires start_telegram_bridge to be running and a user to have messaged the bot at least once.',
+    inputSchema: z.object({
+        message: z.string().describe('The message to send.'),
+    }),
+}, async ({ message }) => {
+    const OUTBOX_DIR = path.join(os.tmpdir(), 'gemini_telegram_outbox');
+    if (!fs.existsSync(OUTBOX_DIR)) {
+        return {
+            content: [{ type: 'text', text: 'Error: Bridge outbox directory not found. Is start_telegram_bridge running?' }],
+            isError: true
+        };
+    }
+    const filename = `msg_${Date.now()}_${Math.random().toString(36).substring(7)}.json`;
+    const filePath = path.join(OUTBOX_DIR, filename);
+    try {
+        fs.writeFileSync(filePath, JSON.stringify({ message }));
+        return {
+            content: [{ type: 'text', text: 'Notification queued.' }]
+        };
+    }
+    catch (e) {
+        return {
+            content: [{ type: 'text', text: `Error queuing notification: ${e.message}` }],
+            isError: true
+        };
+    }
 });
 const transport = new StdioServerTransport();
 await server.connect(transport);
