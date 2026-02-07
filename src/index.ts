@@ -171,7 +171,7 @@ server.registerTool(
         try {
             fs.writeFileSync(filePath, JSON.stringify({ message }));
             return {
-                content: [{ type: 'text', text: `Notification queued.` }]
+                content: [{ type: 'text', text: `Notification queued (ID: ${msgId}).` }]
             };
         } catch (e: any) {
             return {
