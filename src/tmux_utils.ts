@@ -68,32 +68,35 @@ export function sendKeys(target: string, keys: string) {
 }
 
 /**
- * Types text into the tmux pane character by character with delays.
- * This mimics human typing to avoid overwhelming the shell/REPL buffer.
+ * Injects a message atomically into the pane: Clear -> Type -> Enter -> Enter.
+ * Exactly matches the reference 'sendNotification' logic.
  */
-export async function typeText(target: string, text: string, delayMs: number = 20) {
+export async function injectMessage(target: string, text: string) {
     const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-    // Clear line first: Escape (cancel current), C-u (clear line), C-k (clear forward)
-    // We send them individually to be safe
+    // 1. Clear Input
     _exec.execSync(`tmux send-keys -t ${target} Escape`);
-    await delay(50);
-    _exec.execSync(`tmux send-keys -t ${target} C-u`);
-    await delay(50);
-    _exec.execSync(`tmux send-keys -t ${target} C-k`);
     await delay(100);
+    _exec.execSync(`tmux send-keys -t ${target} C-u`);
+    await delay(200);
 
+    // 2. Type Character by Character
     for (const char of text) {
         let key = char;
         if (key === "'") key = "'\\''";
-        
         try {
             _exec.execSync(`tmux send-keys -t ${target} '${key}'`);
         } catch (e) {
             // ignore
         }
-        await delay(delayMs);
+        await delay(20); // 20ms delay per char (reference default)
     }
+
+    // 3. Submit
+    await delay(500);
+    _exec.execSync(`tmux send-keys -t ${target} Enter`);
+    await delay(500);
+    _exec.execSync(`tmux send-keys -t ${target} Enter`);
 }
 
 export function capturePane(target: string, lines?: number): string {

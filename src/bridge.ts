@@ -34,9 +34,10 @@ if (fs.existsSync(CHAT_ID_FILE)) {
     } catch (e) {
         console.error("Failed to load chat ID file", e);
     }
+} else {
+    console.log("No saved Chat ID found. Waiting for incoming message...");
 }
 
-// Watch Outbox
 fs.watch(OUTBOX_DIR, (eventType, filename) => {
     if (eventType === 'rename' && filename) {
         const filePath = path.join(OUTBOX_DIR, filename);
@@ -47,7 +48,7 @@ fs.watch(OUTBOX_DIR, (eventType, filename) => {
 function cleanOutput(text: string): string {
     // 1. Strip ANSI escape codes
     // eslint-disable-next-line no-control-regex
-    let clean = text.replace(/\x1B\[\d+;?\d*m/g, "");
+    let clean = text.replace(/\x1B[[\]?([0-9]{1,4}(;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, "");
     
     // 2. Strip box-drawing characters common in CLI UIs
     clean = clean.replace(/[│─╭╮╰╯─]/g, "");
@@ -101,40 +102,38 @@ bot.on(message('text'), async (ctx) => {
         try { fs.writeFileSync(CHAT_ID_FILE, activeChatId); } catch {} // eslint-disable-line no-empty
     }
 
+    console.log(`[Msg ${msgId}] Received: "${userMsg}"`);
+
     if (await conversationLock.acquire()) {
         try {
             await tmux.waitForStability(targetPane);
             
-            // Type message (slowly, mimicking human input)
-            await tmux.typeText(targetPane, userMsg, 30);
+            console.log(`[Msg ${msgId}] Injecting message...`);
+            await tmux.injectMessage(targetPane, userMsg);
             
-            // Wait for typing to settle (Reference uses 500ms, we use 800ms to be safe)
-            await new Promise(r => setTimeout(r, 800));
-            
-            // Reference Style: Enter -> Wait 500ms -> Enter
-            console.log(`[Msg ${msgId}] Sending Enter...`);
-            tmux.sendKeys(targetPane, 'Enter');
-            
-            await new Promise(r => setTimeout(r, 500));
-            
-            console.log(`[Msg ${msgId}] Sending Enter (confirm)...`);
-            tmux.sendKeys(targetPane, 'Enter'); 
-
+            console.log(`[Msg ${msgId}] Waiting for response...`);
             await tmux.waitForStability(targetPane, 3000, 500, 60000);
             
-            const contentAfter = tmux.capturePane(targetPane, 200);
+            let contentAfter = tmux.capturePane(targetPane, 200);
+            
+            // Remove the last 5 lines (Status bar, prompts) to avoid garbage
+            const lines = contentAfter.split('\n');
+            if (lines.length > 5) {
+                contentAfter = lines.slice(0, -5).join('\n');
+            }
+
             const msgIndex = contentAfter.lastIndexOf(userMsg);
             let response = "";
             
             if (msgIndex !== -1) {
-                // Heuristic: Get text after the message
                 response = contentAfter.substring(msgIndex + userMsg.length).trim();
             } else {
-                 response = tmux.capturePane(targetPane, 20);
+                 // If we can't find our message, take the last 20 lines (of the trimmed content)
+                 const lastLines = lines.slice(0, -5).slice(-20).join('\n');
+                 response = lastLines;
             }
 
             if (response) {
-                // CLEAN UP THE RESPONSE
                 const cleanResponse = cleanOutput(response);
                 
                 if (cleanResponse.length > 4000) {
