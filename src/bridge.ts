@@ -34,17 +34,29 @@ if (fs.existsSync(CHAT_ID_FILE)) {
     } catch (e) {
         console.error("Failed to load chat ID file", e);
     }
-} else {
-    console.log("No saved Chat ID found. Waiting for incoming message...");
 }
 
+// Watch Outbox
 fs.watch(OUTBOX_DIR, (eventType, filename) => {
     if (eventType === 'rename' && filename) {
         const filePath = path.join(OUTBOX_DIR, filename);
-        // Wait for file to be fully written
         setTimeout(() => processOutboxMessage(filePath), 100);
     }
 });
+
+function cleanOutput(text: string): string {
+    // 1. Strip ANSI escape codes
+    // eslint-disable-next-line no-control-regex
+    let clean = text.replace(/\x1B\[\d+;?\d*m/g, "");
+    
+    // 2. Strip box-drawing characters common in CLI UIs
+    clean = clean.replace(/[│─╭╮╰╯─]/g, "");
+    
+    // 3. Remove excessive blank lines resulting from the strip
+    clean = clean.replace(/\n\s*\n/g, "\n");
+    
+    return clean.trim();
+}
 
 async function processOutboxMessage(filePath: string) {
     if (!fs.existsSync(filePath)) return;
@@ -60,56 +72,48 @@ async function processOutboxMessage(filePath: string) {
         }
 
         if (activeChatId) {
-             console.log(`Sending notification to ${activeChatId}: ${msg.substring(0, 50)}...`);
-             let sentMsg;
-             if (msg.length > 4000) {
-                 const chunks = msg.match(/.{1,4000}/g) || [];
+             const cleanMsg = cleanOutput(msg);
+             console.log(`Sending notification: ${cleanMsg.substring(0, 50)}...`);
+             
+             if (cleanMsg.length > 4000) {
+                 const chunks = cleanMsg.match(/.{1,4000}/g) || [];
                  for (const chunk of chunks) {
-                     sentMsg = await bot.telegram.sendMessage(activeChatId, chunk);
+                     await bot.telegram.sendMessage(activeChatId, chunk);
                  }
              } else {
-                 sentMsg = await bot.telegram.sendMessage(activeChatId, msg);
+                 await bot.telegram.sendMessage(activeChatId, cleanMsg);
              }
-             console.log(`Notification sent. Message ID: ${sentMsg?.message_id}`);
-        } else {
-            console.warn("Attempted to send notification but no active Chat ID found. User must message first.");
         }
     } catch (e) {
         console.error(`Failed to process outbox message ${filePath}:`, e);
     } finally {
-        try { fs.unlinkSync(filePath); } catch {}
+        try { fs.unlinkSync(filePath); } catch {} // eslint-disable-line no-empty
     }
 }
-
-console.log(`Starting Telegram Bridge for pane ${targetPane}...`);
 
 bot.on(message('text'), async (ctx) => {
     const userMsg = ctx.message.text;
     const chatId = ctx.chat.id.toString();
-    const msgId = ctx.message.message_id;
     
     if (activeChatId !== chatId) {
         activeChatId = chatId;
-        console.log(`New active Chat ID detected: ${activeChatId}`);
-        try {
-            fs.writeFileSync(CHAT_ID_FILE, activeChatId);
-        } catch (e) {
-            console.error("Failed to save Chat ID", e);
-        }
+        try { fs.writeFileSync(CHAT_ID_FILE, activeChatId); } catch {} // eslint-disable-line no-empty
     }
-
-    console.log(`[Msg ${msgId}] Received: "${userMsg}" from ${chatId}`);
 
     if (await conversationLock.acquire()) {
         try {
-            console.log(`[Msg ${msgId}] Acquired lock. Waiting for stability...`);
             await tmux.waitForStability(targetPane);
             
-            console.log(`[Msg ${msgId}] Typing message...`);
+            // Type message
             tmux.sendKeys(targetPane, userMsg);
-            tmux.sendKeys(targetPane, 'Enter');
             
-            console.log(`[Msg ${msgId}] Waiting for response...`);
+            // ROBUST ENTER SEQUENCE
+            // Send Enter, wait, Send Enter again to ensure submission
+            await new Promise(r => setTimeout(r, 200));
+            tmux.sendKeys(targetPane, 'Enter');
+            await new Promise(r => setTimeout(r, 200));
+            tmux.sendKeys(targetPane, 'Enter'); 
+
             await tmux.waitForStability(targetPane, 3000, 500, 60000);
             
             const contentAfter = tmux.capturePane(targetPane, 200);
@@ -117,41 +121,38 @@ bot.on(message('text'), async (ctx) => {
             let response = "";
             
             if (msgIndex !== -1) {
-                let rawResponse = contentAfter.substring(msgIndex + userMsg.length).trim();
-                response = rawResponse;
+                // Heuristic: Get text after the message
+                response = contentAfter.substring(msgIndex + userMsg.length).trim();
             } else {
                  response = tmux.capturePane(targetPane, 20);
             }
 
             if (response) {
-                console.log(`[Msg ${msgId}] Sending response (${response.length} chars)...`);
-                if (response.length > 4000) {
-                    response = response.substring(response.length - 4000);
-                    response = "[...Truncated...]\n" + response;
+                // CLEAN UP THE RESPONSE
+                const cleanResponse = cleanOutput(response);
+                
+                if (cleanResponse.length > 4000) {
+                    const truncated = cleanResponse.substring(cleanResponse.length - 4000);
+                    await ctx.reply("[...Truncated...]\n" + truncated);
+                } else {
+                    await ctx.reply(cleanResponse || "(Output was empty after cleaning)");
                 }
-                const reply = await ctx.reply(response);
-                console.log(`[Msg ${msgId}] Response sent. Reply ID: ${reply.message_id}`);
             } else {
-                console.log(`[Msg ${msgId}] No output detected.`);
                 await ctx.reply("(No output detected)");
             }
 
         } catch (e: any) {
-            console.error(`[Msg ${msgId}] Error:`, e);
-            await ctx.reply(`Error bridging message: ${e.message}`);
+            console.error(e);
+            await ctx.reply(`Error: ${e.message}`);
         } finally {
             conversationLock.release();
-            console.log(`[Msg ${msgId}] Lock released.`);
         }
     } else {
-        console.warn(`[Msg ${msgId}] Lock busy.`);
-        await ctx.reply("System is busy. Please try again.");
+        await ctx.reply("System is busy.");
     }
 });
 
-bot.launch(() => {
-    console.log("Telegram bot started.");
-});
+bot.launch();
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
