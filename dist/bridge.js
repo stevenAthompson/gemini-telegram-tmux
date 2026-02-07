@@ -56,6 +56,14 @@ function cleanOutput(text) {
     clean = clean.replace(/[│─╭╮╰╯─╼╽╾╿┌┐└┘├┤┬┴┼═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏•✓✖⚠]/g, "");
     // 3. Remove excessive blank lines (preserve single newlines)
     clean = clean.replace(/\n\s*\n/g, '\n');
+    // 4. Remove Gemini CLI Status Bar specific lines
+    // "Using: 8 GEMINI.md files..."
+    // "YOLO mode..."
+    // "Type your message..."
+    clean = clean.replace(/Using: \d+ GEMINI\.md files.*$/gm, "");
+    clean = clean.replace(/YOLO mode \(ctrl \+ y to toggle\).*$/gm, "");
+    clean = clean.replace(/\* +Type your message or @path\/to\/file.*$/gm, "");
+    clean = clean.replace(/~\/.*no sandbox.*Auto.*$/gm, ""); // Bottom path line
     return clean.trim();
 }
 async function processOutboxMessage(filePath) {
@@ -96,9 +104,19 @@ async function processOutboxMessage(filePath) {
     }
 }
 bot.on(message('text'), async (ctx) => {
-    const userMsg = ctx.message.text;
+    let userMsg = ctx.message.text;
     const chatId = ctx.chat.id.toString();
     const msgId = ctx.message.message_id;
+    // Safety: Prevent accidental shell mode trigger in Gemini CLI
+    // An '!' at the start of a line often forces shell execution.
+    // We prepend a space to neutralize it while keeping the message readable.
+    // Also prepend [Telegram] context.
+    const prefix = "[Telegram]: ";
+    userMsg = userMsg.split('\n')
+        .map(line => line.startsWith('!') ? ' ' + line : line)
+        .join('\n');
+    // Combine
+    const finalMsg = `${prefix}${userMsg}`;
     if (activeChatId !== chatId) {
         activeChatId = chatId;
         try {
@@ -111,9 +129,8 @@ bot.on(message('text'), async (ctx) => {
         try {
             await tmux.waitForStability(targetPane);
             console.log(`[Msg ${msgId}] Injecting message...`);
-            await tmux.injectCommand(targetPane, userMsg);
+            await tmux.injectCommand(targetPane, finalMsg);
             console.log(`[Msg ${msgId}] Waiting for response...`);
-            // Reduce timeout to 20s to be more responsive/fail-fast
             await tmux.waitForStability(targetPane, 3000, 500, 20000);
             let contentAfter = tmux.capturePane(targetPane, 200);
             // Remove the last 5 lines (Status bar, prompts) to avoid garbage
@@ -121,10 +138,11 @@ bot.on(message('text'), async (ctx) => {
             if (lines.length > 5) {
                 contentAfter = lines.slice(0, -5).join('\n');
             }
-            const msgIndex = contentAfter.lastIndexOf(userMsg);
+            // We look for the ECHO of what we typed to find where the response starts
+            const msgIndex = contentAfter.lastIndexOf(finalMsg);
             let response = "";
             if (msgIndex !== -1) {
-                response = contentAfter.substring(msgIndex + userMsg.length).trim();
+                response = contentAfter.substring(msgIndex + finalMsg.length).trim();
             }
             else {
                 // If we can't find our message, take the last 20 lines (of the trimmed content)
